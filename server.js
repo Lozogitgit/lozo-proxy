@@ -3,7 +3,7 @@ const cors = require('cors');
 const fetch = require('node-fetch');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // Allow all origins (your GitHub Pages site)
 app.use(cors());
@@ -67,3 +67,4 @@ app.all('/elevenlabs/*', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🐻 Lozo Proxy listening on port ${PORT}`);
 });
+
