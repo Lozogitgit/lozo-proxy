@@ -12,7 +12,7 @@ app.use(express.raw({ type: 'application/json', limit: '10mb' }));
 
 // Health check
 app.get('/', (req, res) => {
-  res.json({ status: 'Lozo Proxy running 🐻', version: '1.0.0' });
+  res.json({ status: 'Lozo Proxy running 🐻', version: '1.1.0' });
 });
 
 // ── Proxy all /elevenlabs/* → https://api.elevenlabs.io/v1/* ──────────────────
@@ -64,7 +64,44 @@ app.all('/elevenlabs/*', async (req, res) => {
   }
 });
 
+// ── Proxy all /anthropic/* → https://api.anthropic.com/v1/* ──────────────────
+app.all('/anthropic/*', async (req, res) => {
+  const path = req.params[0]; // everything after /anthropic/
+  const targetUrl = `https://api.anthropic.com/v1/${path}`;
+
+  const queryString = new URLSearchParams(req.query).toString();
+  const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+    'anthropic-version': '2023-06-01',
+  };
+
+  try {
+    const options = {
+      method: req.method,
+      headers,
+    };
+
+    if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
+      options.body = JSON.stringify(req.body);
+    }
+
+    const upstream = await fetch(fullUrl, options);
+    const contentType = upstream.headers.get('content-type') || 'application/json';
+    res.status(upstream.status);
+    res.setHeader('Content-Type', contentType);
+    const text = await upstream.text();
+    res.send(text);
+  } catch (err) {
+    console.error('Anthropic proxy error:', err.message);
+    res.status(500).json({ error: 'Anthropic proxy failed', details: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🐻 Lozo Proxy listening on port ${PORT}`);
 });
+
 
