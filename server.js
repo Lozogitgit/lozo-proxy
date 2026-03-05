@@ -1,107 +1,96 @@
 const express = require('express');
-const cors = require('cors');
 const fetch = require('node-fetch');
+const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
-// Allow all origins (your GitHub Pages site)
 app.use(cors());
-app.use(express.json());
-app.use(express.raw({ type: 'application/json', limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
 
-// Health check
-app.get('/', (req, res) => {
-  res.json({ status: 'Lozo Proxy running 🐻', version: '1.1.0' });
-});
+// ─── ELEVENLABS ROUTES ────────────────────────────────────────────────────────
 
-// ── Proxy all /elevenlabs/* → https://api.elevenlabs.io/v1/* ──────────────────
-app.all('/elevenlabs/*', async (req, res) => {
-  const path = req.params[0]; // everything after /elevenlabs/
-  const targetUrl = `https://api.elevenlabs.io/v1/${path}`;
-
-  // Forward query params
-  const queryString = new URLSearchParams(req.query).toString();
-  const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
-
-  // Build headers — forward xi-api-key from client
-  const headers = {
-    'Content-Type': req.headers['content-type'] || 'application/json',
-  };
-  if (req.headers['xi-api-key']) {
-    headers['xi-api-key'] = req.headers['xi-api-key'];
-  }
-
+// GET /elevenlabs/voices
+app.get('/elevenlabs/voices', async (req, res) => {
   try {
-    const options = {
-      method: req.method,
-      headers,
-    };
-
-    // Attach body for POST/PUT
-    if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
-      options.body = JSON.stringify(req.body);
-    }
-
-    const upstream = await fetch(fullUrl, options);
-
-    // Pass response headers back
-    const contentType = upstream.headers.get('content-type') || 'application/json';
-    res.status(upstream.status);
-    res.setHeader('Content-Type', contentType);
-
-    // Stream binary (audio) or JSON back
-    if (contentType.includes('audio') || contentType.includes('octet-stream')) {
-      const buffer = await upstream.buffer();
-      res.send(buffer);
-    } else {
-      const text = await upstream.text();
-      res.send(text);
-    }
+    const response = await fetch('https://api.elevenlabs.io/v1/voices', {
+      headers: {
+        'xi-api-key': process.env.ELEVENLABS_API_KEY,
+      },
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
   } catch (err) {
-    console.error('Proxy error:', err.message);
-    res.status(500).json({ error: 'Proxy failed', details: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ── Proxy all /anthropic/* → https://api.anthropic.com/v1/* ──────────────────
-app.all('/anthropic/*', async (req, res) => {
-  const path = req.params[0]; // everything after /anthropic/
-  const targetUrl = `https://api.anthropic.com/v1/${path}`;
-
-  const queryString = new URLSearchParams(req.query).toString();
-  const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-api-key': process.env.ANTHROPIC_API_KEY || '',
-    'anthropic-version': '2023-06-01',
-  };
-
+// POST /elevenlabs/text-to-speech/:voiceId
+app.post('/elevenlabs/text-to-speech/:voiceId', async (req, res) => {
   try {
-    const options = {
-      method: req.method,
-      headers,
-    };
-
-    if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
-      options.body = JSON.stringify(req.body);
-    }
-
-    const upstream = await fetch(fullUrl, options);
-    const contentType = upstream.headers.get('content-type') || 'application/json';
-    res.status(upstream.status);
-    res.setHeader('Content-Type', contentType);
-    const text = await upstream.text();
-    res.send(text);
+    const { voiceId } = req.params;
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': process.env.ELEVENLABS_API_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(req.body),
+      }
+    );
+    const buffer = await response.buffer();
+    res.status(response.status)
+       .set('Content-Type', 'audio/mpeg')
+       .send(buffer);
   } catch (err) {
-    console.error('Anthropic proxy error:', err.message);
-    res.status(500).json({ error: 'Anthropic proxy failed', details: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🐻 Lozo Proxy listening on port ${PORT}`);
+// POST /elevenlabs/sound-generation
+app.post('/elevenlabs/sound-generation', async (req, res) => {
+  try {
+    const response = await fetch('https://api.elevenlabs.io/v1/sound-generation', {
+      method: 'POST',
+      headers: {
+        'xi-api-key': process.env.ELEVENLABS_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(req.body),
+    });
+    const buffer = await response.buffer();
+    res.status(response.status)
+       .set('Content-Type', 'audio/mpeg')
+       .send(buffer);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// ─── ANTHROPIC ROUTES ─────────────────────────────────────────────────────────
 
+// POST /anthropic/messages
+app.post('/anthropic/messages', async (req, res) => {
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(req.body),
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
+app.get('/', (req, res) => res.send('Lozo Proxy is running'));
+
+app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
